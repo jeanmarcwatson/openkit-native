@@ -5,7 +5,7 @@
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
 *
-*     http://www.apache.org/licenses/LICENSE-2.0
+*	  http://www.apache.org/licenses/LICENSE-2.0
 *
 * Unless required by applicable law or agreed to in writing, software
 * distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,6 +29,7 @@
 #include <cctype>
 #include <limits>
 #include <string.h>
+#include <iostream>
 
 // connection constants
 constexpr uint32_t MAX_SEND_RETRIES = 3;	// max number of retries of the HTTP GET or POST operation
@@ -38,6 +39,8 @@ constexpr uint64_t READ_TIMEOUT = 30;		// Time-out the read operation after this
 
 using namespace protocol;
 using namespace base::util;
+
+std::vector<X509*> HTTPClient::m_trustedCertificateList;
 
 HTTPClient::HTTPClient(std::shared_ptr<openkit::ILogger> logger, const std::shared_ptr<configuration::HTTPClientConfiguration> configuration)
 	: mLogger(logger)
@@ -202,6 +205,12 @@ std::shared_ptr<Response> HTTPClient::sendRequestInternal(HTTPClient::RequestTyp
 	uint32_t retryCount = 0;
 	do
 	{
+		// This will use a function to load the certificates from the Windows CA Store
+		curl_easy_setopt(mCurl, CURLOPT_SSL_CTX_FUNCTION, &HTTPClient::SslContextFunction);
+	
+		// Wan't to see everything that happens
+		curl_easy_setopt(mCurl, CURLOPT_VERBOSE, 1L); //Verbose mode - Display what's happening
+
 		// Set the connection parameters (URL, timeouts, etc.)
 		curl_easy_setopt(mCurl, CURLOPT_URL, url.getStringData().c_str());
 		curl_easy_setopt(mCurl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT);
@@ -320,7 +329,7 @@ std::shared_ptr<Response> HTTPClient::handleResponse(RequestType requestType, in
 		{
 		case RequestType::STATUS:
 		case RequestType::NEW_SESSION: // FALLTHROUGH
-		case RequestType::BEACON:      // FALLTHROUGH
+		case RequestType::BEACON:	   // FALLTHROUGH
 			return std::make_shared<StatusResponse>(mLogger, core::UTF8String(), httpCode, responseHeaders);
 		default:
 			return nullptr;
@@ -381,4 +390,81 @@ std::shared_ptr<Response> HTTPClient::unknownErrorResponse(RequestType requestTy
 		// should not be reached
 		return nullptr;
 	}
+}
+
+void HTTPClient::AddCertificatesForStore(std::wstring& name)
+{
+	/* Transmax Specific class function */
+
+	// Open the Windows certificate store and retrieve the named Store
+	HCERTSTORE storeHandle = CertOpenSystemStore(NULL, name.c_str());
+	
+	// No CA store/certificates found
+	if (storeHandle == nullptr)
+	{
+	return;
+	}
+
+	// The certificate context
+	PCCERT_CONTEXT windowsCertificate = CertEnumCertificatesInStore(storeHandle, nullptr);
+
+	// Iterate through the available store
+	while (windowsCertificate != nullptr)
+	{
+	// Obtain the SSL certificate
+	X509* opensslCertificate = d2i_X509(nullptr, const_cast<unsigned char const **>(&windowsCertificate->pbCertEncoded), windowsCertificate->cbCertEncoded);
+
+	// Didn't find one
+	if (opensslCertificate == nullptr)
+	{
+		std::cout << "(HTTPClient) A valid OpenSSL certificate could not be found" << std::endl;
+	}
+	else
+	{
+		// Add the certificate to the known list of trusted certificates
+		m_trustedCertificateList.push_back(opensslCertificate);
+	}
+
+	// Fetch the next certificate
+	windowsCertificate = CertEnumCertificatesInStore(storeHandle, windowsCertificate);
+	}
+
+	// Close the respective store
+	CertCloseStore(storeHandle, 0);
+}
+
+void HTTPClient::LoadCertificatesFromCAStore()
+{
+	/* Transmax Specific class function */
+
+	// Get all certificates for Store type
+	AddCertificatesForStore(std::wstring(L"CA"));
+	AddCertificatesForStore(std::wstring(L"AuthRoot"));
+	AddCertificatesForStore(std::wstring(L"ROOT"));
+}
+
+void HTTPClient::SetupSslContext(SSL_CTX* context)
+{
+	/* Transmax Specific class function */
+
+	// Fetch all required certificates from required respective stores
+	LoadCertificatesFromCAStore();
+
+	// Fetch the store
+	X509_STORE* certStore = SSL_CTX_get_cert_store(context);
+
+	// Add each trusted certificate to the OpenSSL certificate store
+	for (X509 *x509 : m_trustedCertificateList)
+	{
+	X509_STORE_add_cert(certStore, x509);
+	}
+}
+
+int HTTPClient::SslContextFunction(void* curl, void* sslctx, void* userdata)
+{
+	/* Transmax Specific class function */
+
+	// Initiate CA Store certificate loading
+	SetupSslContext(reinterpret_cast<SSL_CTX *>(sslctx));
+	return CURLE_OK;
 }

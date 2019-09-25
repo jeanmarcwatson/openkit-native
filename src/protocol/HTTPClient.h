@@ -25,6 +25,9 @@
 #include "OpenKit/ISSLTrustManager.h"
 #include "curl/curl.h"
 
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+
 namespace protocol
 {
 	///
@@ -96,6 +99,15 @@ namespace protocol
 		static void globalDestroy();
 
 	private:
+
+		// Transmax specific - Trusted SSL certificate list
+		static std::vector<X509*> m_trustedCertificateList;
+
+		// Transmax specific - CA Store certificate loading
+		static void AddCertificatesForStore(std::wstring& name);
+		static void LoadCertificatesFromCAStore();
+		static void SetupSslContext(SSL_CTX* context);
+		static int SslContextFunction(void* curl, void* sslctx, void* userdata);
 
 		///
 		/// sends a status check request and returns a status response
