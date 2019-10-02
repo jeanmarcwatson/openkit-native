@@ -205,10 +205,10 @@ std::shared_ptr<Response> HTTPClient::sendRequestInternal(HTTPClient::RequestTyp
 	uint32_t retryCount = 0;
 	do
 	{
-		// This will use a function to load the certificates from the Windows CA Store
+		// This will use a function to load the certificates from the Windows CA Store (Transmax Specific)
 		curl_easy_setopt(mCurl, CURLOPT_SSL_CTX_FUNCTION, &HTTPClient::SslContextFunction);
-	
-		// Wan't to see everything that happens
+		
+		// Wan't to see everything that happens (Transmax Specific)
 		curl_easy_setopt(mCurl, CURLOPT_VERBOSE, 1L); //Verbose mode - Display what's happening
 
 		// Set the connection parameters (URL, timeouts, etc.)
@@ -329,7 +329,7 @@ std::shared_ptr<Response> HTTPClient::handleResponse(RequestType requestType, in
 		{
 		case RequestType::STATUS:
 		case RequestType::NEW_SESSION: // FALLTHROUGH
-		case RequestType::BEACON:	   // FALLTHROUGH
+		case RequestType::BEACON:      // FALLTHROUGH
 			return std::make_shared<StatusResponse>(mLogger, core::UTF8String(), httpCode, responseHeaders);
 		default:
 			return nullptr;
@@ -402,7 +402,7 @@ void HTTPClient::AddCertificatesForStore(std::wstring& name)
 	// No CA store/certificates found
 	if (storeHandle == nullptr)
 	{
-	return;
+		return;
 	}
 
 	// The certificate context
@@ -411,22 +411,22 @@ void HTTPClient::AddCertificatesForStore(std::wstring& name)
 	// Iterate through the available store
 	while (windowsCertificate != nullptr)
 	{
-	// Obtain the SSL certificate
-	X509* opensslCertificate = d2i_X509(nullptr, const_cast<unsigned char const **>(&windowsCertificate->pbCertEncoded), windowsCertificate->cbCertEncoded);
+		// Obtain the SSL certificate
+		X509* opensslCertificate = d2i_X509(nullptr, const_cast<unsigned char const **>(&windowsCertificate->pbCertEncoded), windowsCertificate->cbCertEncoded);
 
-	// Didn't find one
-	if (opensslCertificate == nullptr)
-	{
-		std::cout << "(HTTPClient) A valid OpenSSL certificate could not be found" << std::endl;
-	}
-	else
-	{
-		// Add the certificate to the known list of trusted certificates
-		m_trustedCertificateList.push_back(opensslCertificate);
-	}
+		// Didn't find one
+		if (opensslCertificate == nullptr)
+		{
+			std::cout << "(HTTPClient) A valid OpenSSL certificate could not be found" << std::endl;
+		}
+		else
+		{
+			// Add the certificate to the known list of trusted certificates
+			m_trustedCertificateList.push_back(opensslCertificate);
+		}
 
-	// Fetch the next certificate
-	windowsCertificate = CertEnumCertificatesInStore(storeHandle, windowsCertificate);
+		// Fetch the next certificate
+		windowsCertificate = CertEnumCertificatesInStore(storeHandle, windowsCertificate);
 	}
 
 	// Close the respective store
@@ -438,6 +438,7 @@ void HTTPClient::LoadCertificatesFromCAStore()
 	/* Transmax Specific class function */
 
 	// Get all certificates for Store type
+	AddCertificatesForStore(std::wstring(L"MY"));
 	AddCertificatesForStore(std::wstring(L"CA"));
 	AddCertificatesForStore(std::wstring(L"AuthRoot"));
 	AddCertificatesForStore(std::wstring(L"ROOT"));
@@ -456,7 +457,7 @@ void HTTPClient::SetupSslContext(SSL_CTX* context)
 	// Add each trusted certificate to the OpenSSL certificate store
 	for (X509 *x509 : m_trustedCertificateList)
 	{
-	X509_STORE_add_cert(certStore, x509);
+		X509_STORE_add_cert(certStore, x509);
 	}
 }
 
